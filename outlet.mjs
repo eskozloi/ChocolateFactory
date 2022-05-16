@@ -32,25 +32,22 @@ const addCacao = (amount) => {
 
 const addIngredient = (ingredient, amount) => {
   bucket[ingredient] += amount
+  scanBucket()
 }
 
 const scanBucket = () => {
-  let ingredients = []
+  /*let ingredients = proportions.forEach(([ingredient, ratio]) => {
+    const reqAmount = bucket.capacity * ratio - bucket[ingredient]
+    if (reqAmount > 0) return proportions[ingredient] = reqAmount
+  })*/
+  let ingredients = {}
   Object.entries(proportions).forEach(([ingredient, ratio]) => {
     const reqAmount = bucket.capacity * ratio - bucket[ingredient]
-    if(reqAmount === 0) return
-    let reqIngredient = {}
-    reqIngredient[ingredient] = reqAmount
-    ingredients.push(reqIngredient)
+    if(reqAmount !== 0) ingredients[ingredient] = reqAmount
   })
-  /*let ingredients = []
-  Object.values(proportions).forEach((ingredient) => {
-    console.log(ingredient)
-    //const reqAmount = bucket.capacity * ingredient.ratio - bucket[ingredient]
-  })*/
   console.log(ingredients)
   if(ingredients.length !== 0) parentPort.postMessage({header: 'requestIngredients', body: ingredients})
-  //else parentPort.postMessage({header: 'returnBucket', body: bucket, reason: 'done'})
+  else parentPort.postMessage({header: 'returnBucket', body: bucket, reason: 'done'})
 }
 
 const livelinessCheck = setInterval(() => {
@@ -67,7 +64,6 @@ parentPort.on('message', (message) => {
       Object.entries(message.ingredients).forEach(([ingredient, amount]) => {addIngredient(ingredient, amount)})
       break
     case 'insertBucket':
-      console.log('fsdfdsfsd')
       insertBucket(message.body)
       break
     case 'requestBucket':

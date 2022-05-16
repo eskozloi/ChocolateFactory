@@ -4,9 +4,10 @@ import { Worker } from 'worker_threads'
 
 class Machine {
 
-	ingredients = [
-		{ ingredient: 'milk', amount: 0 },
-		{ ingredient: 'cacao', amount: 0 }
+	containers = [
+		{ ingredient: 'milk', amount: 0, capacity: Infinity }, // 'milk' is not going to be a key, because there are can be multiple 'milk' containers
+		{ ingredient: 'cacao', amount: 0, capacity: Infinity },
+		{ ingredient: 'waste', amount: 0, capacity: Infinity },
 		// { ingredient: something, amount: 0 },
 		// etc...
 	]
@@ -85,13 +86,58 @@ class Machine {
 
 	addMilk(amount) {
 		// maybe use 'Something went wrong with a milk pipe' ?
-		if(typeof amount !== 'number') throw new Error("'amount' must be a number, not a " + typeof amount)
-		this.milk += amount
+		if(typeof amount !== 'number') throw new Error("Milk 'amount' must be a number, not a " + typeof amount)
+		//this.milk += amount
+		this.addIngredient('milk', amount)
 	}
 
 	addCacao(amount) {
-		if(typeof amount !== 'number') throw new Error("'amount' must be a number, not a " + typeof amount)
-		this.cacao += amount
+		if(typeof amount !== 'number') throw new Error("Cacao 'amount' must be a number, not a " + typeof amount)
+		//this.cacao += amount
+		this.addIngredient('cacao', amount)
+	}
+
+	async addIngredient(ingredient, amount) {
+		/*if(typeof ingredient !== 'string') throw new Error(`'ingredient' must be a string, not a ${typeof ingredient}`)
+		if(typeof amount !== 'number') throw new Error(`'amount' must be a number, not a ${typeof amount}`)*/
+		return new Promise((resolve, reject) => {
+			//const wasteContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
+			const ingredientContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
+			if(ingredientContainersId.length === 0) {
+				// TODO: this
+				/*if(wasteContainersId.length === 0) {
+
+					return reject(`There is no waste containers in the machine, random empty container will be used`)
+				}*/
+				reject(`There is no containers with a '${ingredient}' ingredient in the machine`)
+			}
+			let i = 0
+			const ingredientContainersIdLeng = ingredientContainersId.length
+			while(i < ingredientContainersIdLeng) {
+				const containerFreeSpace = this.containers[i].capacity - this.containers[i].amount
+				if(containerFreeSpace > amount) {
+					this.containers[i].amount += amount
+					i++
+					break
+				}
+				this.containers[i].amount = this.containers[i].capacity
+				amount = amount - containerFreeSpace
+				i++
+				//resolve(`${amount} ${ingredient} added to container ${i}`)
+			}
+			if(amount === 0) resolve()
+			// TODO: make exception when there is no space in the 'ingredient' containers
+			reject(`TODO: make exception when there is no space in the 'ingredient' containers | ${ingredient} | ${amount}`)
+		}).then(() => {
+			console.log(`${amount} units of ${ingredient} were added to the machine`)
+			this.checkIngredientsQueue()
+		}).catch((err) => {
+			console.log(err)
+		})
+	}
+
+	async checkIngredientsQueue() {
+
 	}
 
 	async load(buckets, onBucketReady, slotsNumber) {
@@ -205,28 +251,23 @@ class Machine {
 					case 'requestIngredients':
 						//const ingredient = (message.header === 'requestMilk') ? 'milk' : 'cacao'
 						//const responseBody = []
-						let i = 0
-						const ingredientsLeng = message.body.length
-						while(i < ingredientsLeng) {
-							Object.entries(message.body[i]).forEach(([ingredient, amount]) => {
-								this.requestIngredient(ingredient, amount).then((recivedAmount) => {
-									if(recivedAmount > 0) {
-										let respIngredient = {}
-										respIngredient[ingredient] = recivedAmount
-										this.outlets[outletId].process.postMessage({header: 'addIngredients', body: respIngredient})
-									}
-									else {
-										if(!this.outlets[outletId].queue) this.outlets[outletId].queue = []
-										//this.outlets[outletId].queue.push({ingredient: message.body.ingredient, amount: message.body.amount})
-										this.outlets[outletId].queue[ingredient] = amount
-										console.log(this.outlets[outletId].queue)
-									}
-									//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: amount})
-									//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: message.body})
-								}).catch((err) => {console.log(err)})
-							})
-						i++
-						}
+						Object.entries(message.body).forEach(([ingredient, amount]) => {
+							this.requestIngredient(ingredient, amount).then((recivedAmount) => {
+								if(recivedAmount > 0) {
+									let respIngredient = {}
+									respIngredient[ingredient] = recivedAmount
+									this.outlets[outletId].process.postMessage({header: 'addIngredients', body: respIngredient})
+								}
+								else {
+									if(!this.outlets[outletId].queue) this.outlets[outletId].queue = {}
+									//this.outlets[outletId].queue.push({ingredient: message.body.ingredient, amount: message.body.amount})
+									this.outlets[outletId].queue[ingredient] = amount
+									console.log(this.outlets[outletId].queue)
+								}
+								//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: amount})
+								//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: message.body})
+							}).catch((err) => {console.log(err)})
+						})
 						/*let i = 0
 						const ingredientsLeng = message.body.length
 						while(i < ingredientsLeng) {
@@ -355,22 +396,22 @@ class Machine {
 		return new Promise((resolve, reject) => {
 			//console.log('HERE')
 			//this.ingredients.map((val) => { return val.ingredient === ingredient })
-			const ingredientContainersId = Object.keys(this.ingredients).filter((key) => { return this.ingredients[key].ingredient === ingredient })
+			const ingredientContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
 			if(ingredientContainersId.length === 0) reject(`There is no '${ingredient}' ingredient`)
 			let i = 0
 			const ingredientContainersIdLeng = ingredientContainersId.length
 			let amount
 			let collectedAmount = 0
 			while(i < ingredientContainersIdLeng) {
-				amount = this.ingredients[ingredientContainersId[i]].amount
+				amount = this.containers[ingredientContainersId[i]].amount
 				if(amount > 0) {
 					if(amount > reqAmount) {
-						this.ingredients[ingredientContainersId[i]].amount -= reqAmount
+						this.containers[ingredientContainersId[i]].amount -= reqAmount
 						collectedAmount += reqAmount
 						//resolve(reqAmount)
 					}
 					else {
-						this.ingredients[ingredientContainersId[i]].amount = 0
+						this.containers[ingredientContainersId[i]].amount = 0
 						//resolve(amount)
 						collectedAmount += amount
 					}
