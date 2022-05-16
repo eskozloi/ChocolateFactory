@@ -8,7 +8,7 @@ class Machine {
 		{ ingredient: 'milk', amount: 0, capacity: Infinity }, // 'milk' is not going to be a key, because there are can be multiple 'milk' containers
 		{ ingredient: 'cacao', amount: 0, capacity: Infinity },
 		{ ingredient: 'waste', amount: 0, capacity: Infinity },
-		// { ingredient: something, amount: 0 },
+		// { ingredient: something, amount: 0, capacity: 9999 },
 		// etc...
 	]
 
@@ -23,41 +23,24 @@ class Machine {
 
 	machineSlotsNumber = 2
 
-	outlets = []
+	outlets = [] // [{status: 0, process: null},{status: -1, process: null}]
 	// Status represents not only outlet's status, but also priority level
 	// Where everything: < 0 -> errors, 0 -> idle/inactive, > 0 -> priority level(lower = higher priority)
 	// Error codes: -1 -> bussy(e.g. self repairing/cleaning), -2 -> broken(e.g. throws errors), -3 -> unknow(no connection between machine and outlet)
+	// Some outlets will also  get:
+	//		'bucketLogs' -> to know the bucket state (needed if outlet will die)
+	//		'liveliness' -> to track the outlet's connection to the machine
+	//		'queue' -> to send ingredients to the outlet later, when new ingredients arrived
 
-	//ingredientsQueue = [] // e.g. outletId: {milk: 10, cacao: 25}
 
-	//logs = []
-	// If outlet dies, logs can be used to get bucet's state, so it can be processed by another outlet or the same one after repairing process
-
+	// TODO: this
 	//errorLog = []
 	// If the same error came from the same outlet, outlet will get the broken status ('priority' = -2)
 	// If all outlets threw error, the machine will be stopped
 
-	//outletsLivelinessCheckQueue = []
-
 	constructor(machineSlotsNumber, outlets) {
 		if(machineSlotsNumber && typeof machineSlotsNumber === 'number') this.machineSlotsNumber = machineSlotsNumber
 		if(outlets && Array.isArray(outlets)) {
-			/*this.outlets = []
-			const outletsLeng = outlets.length
-			let i = 0
-			while(i < outletsLeng) {
-				Object.entries(outlets[i]).forEach(([key, value]) => {
-					if(key === 'status'){
-						if(typeof value !== 'number') i++
-					}
-					else if(key === 'process'){
-						if(typeof value !== 'function' || value === null) i++
-					}
-					else i++
-				})
-				this.outlets.push(outlets[i])
-				i++
-			}*/
 			const validOutlets = outlets.filter((val) => {
 				return (typeof val.status === 'number' && val.process === null) //TODO: something with this shit
 			})
@@ -66,6 +49,7 @@ class Machine {
 		if(this.outlets.length === 0) {
 			//this.outlets = [{status: 0, process: null},{status: -1, process: null}]
 			//this.outlets = [{status: 0, process: null},{status: 0, process: null},{status: 0, process: null}]
+			//this.outlets = [{status: 0, process: null},{status: 0, process: null},{status: 3, process: null},{status: 0, process: null}]
 			let outlets = []
 			let i = 0;
 			const rndOutletsNum = Math.round(Math.random() * 3 + 3)
@@ -79,21 +63,15 @@ class Machine {
 			}
 			this.outlets = outlets
 		}
-		/*const outlets = this.getAllOutlets()
-		if(outlets.length === 0) throw new Error("There is no outlets in the machine")
-		this.outlets = outlets*/
 	}
 
 	addMilk(amount) {
-		// maybe use 'Something went wrong with a milk pipe' ?
 		if(typeof amount !== 'number') throw new Error("Milk 'amount' must be a number, not a " + typeof amount)
-		//this.milk += amount
 		this.addIngredient('milk', amount)
 	}
 
 	addCacao(amount) {
 		if(typeof amount !== 'number') throw new Error("Cacao 'amount' must be a number, not a " + typeof amount)
-		//this.cacao += amount
 		this.addIngredient('cacao', amount)
 	}
 
@@ -109,35 +87,52 @@ class Machine {
 
 					return reject(`There is no waste containers in the machine, random empty container will be used`)
 				}*/
-				reject(`There is no containers with a '${ingredient}' ingredient in the machine`)
+				return reject(`There is no containers with a '${ingredient}' ingredient in the machine`)
 			}
 			let i = 0
 			const ingredientContainersIdLeng = ingredientContainersId.length
 			while(i < ingredientContainersIdLeng) {
-				const containerFreeSpace = this.containers[i].capacity - this.containers[i].amount
+				const containerFreeSpace = this.containers[ingredientContainersId[i]].capacity - this.containers[ingredientContainersId[i]].amount
 				if(containerFreeSpace > amount) {
-					this.containers[i].amount += amount
+					this.containers[ingredientContainersId[i]].amount += amount
+					amount = 0
 					i++
 					break
 				}
 				this.containers[i].amount = this.containers[i].capacity
 				amount = amount - containerFreeSpace
 				i++
-				//resolve(`${amount} ${ingredient} added to container ${i}`)
 			}
-			if(amount === 0) resolve()
+			if(amount === 0) return resolve(ingredient)
 			// TODO: make exception when there is no space in the 'ingredient' containers
-			reject(`TODO: make exception when there is no space in the 'ingredient' containers | ${ingredient} | ${amount}`)
-		}).then(() => {
-			console.log(`${amount} units of ${ingredient} were added to the machine`)
-			this.checkIngredientsQueue()
+			return reject(`TODO: make exception when there is no space in the 'ingredient' containers | ${ingredient} | ${amount}`)
+		}).then((ingredient) => {
+			this.checkIngredientsQueue(ingredient)
 		}).catch((err) => {
 			console.log(err)
 		})
 	}
 
-	async checkIngredientsQueue() {
-
+	async checkIngredientsQueue(ingredient) {
+		let topPriorityOutletId
+		let topPriority = Infinity
+		Object.entries(this.outlets).forEach(([id, outlet]) => {
+			if(outlet.status > 0 && outlet.queue && outlet.queue[ingredient]) {
+				if(outlet.status < topPriority) {
+					topPriority = outlet.status
+					topPriorityOutletId = id
+				}
+			}
+		})
+		if(topPriorityOutletId){
+			this.requestIngredient(ingredient, this.outlets[topPriorityOutletId].queue[ingredient]).then((recivedAmount) => {
+				let respIngredient = {}
+				respIngredient[ingredient] = recivedAmount
+				this.outlets[topPriorityOutletId].process.postMessage({header: 'addIngredients', body: respIngredient})
+				this.outlets[topPriorityOutletId].bucketLogs[ingredient] += recivedAmount
+				delete this.outlets[topPriorityOutletId].queue[ingredient]
+			})
+		}
 	}
 
 	async load(buckets, onBucketReady, slotsNumber) {
@@ -145,26 +140,14 @@ class Machine {
 		if(typeof onBucketReady !== 'function') throw new Error("'onBucketReady' must be a function, not a " + typeof onBucketReady)
 		if(!slotsNumber || typeof slotsNumber !== 'number' || slotsNumber > this.machineSlotsNumber) slotsNumber = this.machineSlotsNumber
 
-		/*let i = 0
-		const bucketsLeng = buckets.length
-		while(i < bucketsLeng) {
-			Object.entries(buckets[i]).forEach(([key, value]) => {
-				if((key !== 'capacity' || key !== 'milk' || key !== 'cacao') || typeof value !== 'number') i++
-			})
-			this.buckets.push(buckets[i])
-			i++
-		}*/
+		this.onBucketReady = onBucketReady
 		const validBuckets = buckets.map((bucket) => {
-			//const validBucket = Object.entries(bucket).map(([key, value]) => { return bucket[key] = Number(value) })
 			Object.entries(bucket).forEach(([key, value]) => {
 				const newValue = Number(value)
 				bucket[key] = (newValue) ? newValue : 0
 			})
-			//console.log(bucket)
 			return bucket
 		})
-		/*console.log(validBuckets)
-		return*/
 		if(validBuckets.length !== 0) this.buckets = validBuckets
 
 		let promiseArray = []
@@ -178,36 +161,19 @@ class Machine {
 		const outletsLivelinessCheck = setInterval(() => {
 			const runningOutletsId = Object.keys(this.outlets).filter((key) => { return this.outlets[key].status > 0 })
 			if(runningOutletsId.length === 0) return clearInterval(outletsLivelinessCheck)
-			//this.outletsLivenessCheckQueue.concat(runningOutlets)
-			/*if(this.outletsLivelinessCheck.length !== 0) {
-				i = 0
-				while(i < this.outletsLivelinessCheck.length) {
 
-					i++
-				}
-			}*/
-			//console.log(runningOutletsId)
 			let outlet
 			const roLeng = runningOutletsId.length
 			i = 0
 			while(i < roLeng) {
-				/*this.outletsLivelinessCheckQueue.push({
-					outletId: runningOutlets[j],
-					status: 0
-				})*/
 				outlet = this.outlets[runningOutletsId[i]]
-				//console.log(runningOutletsId[i])
-				//console.log(this.outlets)
 				if(!outlet.process || outlet.liveliness === -2) {
-					//console.log('yes')
 					this.outlets[runningOutletsId[i]].status = -3
 					i++
 					continue
 				}
 				this.outlets[runningOutletsId[i]].liveliness = (outlet.liveliness !== undefined) ? outlet.liveliness - 1 : 0
 				try {
-					console.log('here goes ping')
-					//console.log(this.outlets[runningOutletsId[i]])
 					this.outlets[runningOutletsId[i]].process.postMessage({header: 'ping'})
 				}
 				catch(err) {
@@ -216,7 +182,7 @@ class Machine {
 				 }
 				i++
 			}
-		}, 2000)
+		}, 200)
 
 		return Promise.all(promiseArray)
 	}
@@ -225,7 +191,7 @@ class Machine {
 		return new Promise(async (resolve, reject) => {
 			if(outletId === undefined || typeof outletId !== 'number') outletId = this.outlets.findIndex((outlet) => outlet.status === 0)
 			if(outletId === -1) {
-				console.log(this.outlets)
+				//console.log(this.outlets)
 				if(this.outlets.find((val) => { return val.status > -2 }) === undefined) {
 					console.log('rejecting')
 					return reject("There are no outlets available")
@@ -241,86 +207,63 @@ class Machine {
 					}
 				}
 			}
-			this.outlets[outletId].status = -1 // changing outlet's status to -1 as soon as possible to avoid conflicts // TODO: make it elsehow
+			this.outlets[outletId].status = -1
 			console.log('setUpNewOutlet '+outletId)
 			this.outlets[outletId].process = new Worker('./outlet.mjs', { workerData: this.proportions })
+			let bucket = this.buckets.shift()
+			this.outlets[outletId].bucketLogs = bucket
+			this.outlets[outletId].process.postMessage({header: 'insertBucket', body: bucket})
 			this.outlets[outletId].status = this.getNewPriorityLevel() // TODO: maybe make functions ONLY for outlets, because there are can be other "mechanisms"
 			this.outlets[outletId].process.on('message', (message) => {
-				console.log('message '+message.header)
 				switch(message.header) {
 					case 'requestIngredients':
-						//const ingredient = (message.header === 'requestMilk') ? 'milk' : 'cacao'
-						//const responseBody = []
 						Object.entries(message.body).forEach(([ingredient, amount]) => {
 							this.requestIngredient(ingredient, amount).then((recivedAmount) => {
 								if(recivedAmount > 0) {
 									let respIngredient = {}
 									respIngredient[ingredient] = recivedAmount
 									this.outlets[outletId].process.postMessage({header: 'addIngredients', body: respIngredient})
+									this.outlets[outletId].bucketLogs[ingredient] += recivedAmount
 								}
 								else {
 									if(!this.outlets[outletId].queue) this.outlets[outletId].queue = {}
-									//this.outlets[outletId].queue.push({ingredient: message.body.ingredient, amount: message.body.amount})
 									this.outlets[outletId].queue[ingredient] = amount
-									console.log(this.outlets[outletId].queue)
 								}
-								//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: amount})
-								//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: message.body})
 							}).catch((err) => {console.log(err)})
 						})
-						/*let i = 0
-						const ingredientsLeng = message.body.length
-						while(i < ingredientsLeng) {
-							this.requestIngredient(message.body.ingredient, message.body.amount).then((recivedAmount) => {
-								//console.log('HERE')
-								if(recivedAmount > 0) {
-									//let respIngredient = {}
-									//respIngredient[ingredient] = recivedAmount
-									//this.outlets[outletId].process.postMessage({header: 'addIngredients', body: respIngredient})
-									this.outlets[outletId].process.postMessage({header: 'addIngredients', body: [{ingredient: message.body.ingredient, amount: recivedAmount}]})
-								}
-								else {
-									//console.log('HERE')
-									if(!this.outlets[outletId].queue) this.outlets[outletId].queue = []
-									this.outlets[outletId].queue.push({ingredient: message.body.ingredient, amount: message.body.amount})
-									//console.log(this.outlets[outletId].queue)
-								}
-								//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: amount})
-								//else this.ingredientsQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: message.body})
-							}).catch((err) => {console.log(err)})
-							i++
-						}*/
-						//if(responseBody.length !== 0) this.outlets[outletId].process.postMessage({header: 'addIngredients', body: responseBody})
 						break
 					case 'requestBucket':
-						this.outlets[outletId].process.postMessage({header: 'insertBucket', body: this.buckets.shift()})
+						bucket = this.buckets.shift()
+						this.outlets[outletId].bucketLogs = bucket
+						this.outlets[outletId].process.postMessage({header: 'insertBucket', body: bucket})
 						break
 					case 'returnBucket':
-						const bucket = message.body
+						bucket = message.body
 						switch(message.reason) {
 							case 'done':
-								onBucketReady()
+								//console.log(`status: ${this.outlets[outletId].status} | outletId ${outletId}`)
+								this.onBucketReady(bucket)
 								if(this.buckets.length === 0) {
 									this.outlets[outletId].process.terminate()
 									this.outlets[outletId].process = null
 									this.outlets[outletId].status = 0
 									return resolve()
-									//if(this.getRunningOutlets().length === 0) resolve()
 								}
-								this.outlets[outletId].process.postMessage({header: 'insertBucket', body: this.buckets.shift()})
+								this.outlets[outletId].status = this.getNewPriorityLevel()
+								bucket = this.buckets.shift()
+								this.outlets[outletId].bucketLogs = bucket
+								this.outlets[outletId].process.postMessage({header: 'insertBucket', body: bucket})
 								break
 							case 'error':
 								this.buckets.unshift(bucket)
 								this.outlets[outletId].status = -1
 								return reject('changeOutlet')
-								break
 							case 'critical error':
 								this.buckets.unshift(bucket)
 								this.outlets[outletId].process.terminate()
 								this.outlets[outletId].process = null
 								this.outlets[outletId].status = -2
 								return reject('changeOutlet')
-								break
 						}
 						break
 					case 'pong':
@@ -330,110 +273,53 @@ class Machine {
 						console.log(`Unknown message | machine | ${message.header}`)
 						break
 				}
-				/*if(message.header === 'requestMilk' || message.header === 'requestCacao') {
-					const ingredient = (message.header === 'requestMilk') ? 'milk' : 'cacao'
-					requestIngredients(ingredient, message.body).then((amount) => {
-						if(amount > 0) this.outlets[outletId].process.postMessage({header: 'add'+ingredient, body: amount})
-						else this.ingredientQueue.push({outlet: this.outlets[outletId], ingredient: ingredient, amount: message.body})
-					}).catch((err) => {
-						console.log(err)
-						//console.log('Will try to return the bucket and repair the outlet')
-						//this.outlets[outletId].process.postMessage({header: 'returnBucket'})
-						//this.outlets[outletId].process.terminate()
-						//this.outlets[outletId].process = new Worker('./outlet.js')
-					})
-				}
-				else if(message.header === 'pong') {
-					this.outlets[outletId].liveliness = 1
-				}
-				else if(message.header === 'requestBucket') {
-					this.outlets[outletId].process.postMessage({header: 'insertBucket', body: this.buckets.shift()})
-				}*/
-				/*else if(message.header === 'returnBucket') {
-					if(message.reason === 'done') {
-						let bucket = message.body
-						onBucketReady()
-						if(this.buckets.length === 0) {
-							this.outlets[outletId].process.terminate()
-							this.outlets[outletId].process = null
-							this.outlets[outletId].status = 0
-							if(this.getRunningOutlets().length === 0) resolve()
-						}
-						this.outlets[outletId].process.postMessage({header: 'insertBucket', body: this.buckets.shift()})
-					}
-					else{
-						console.log('bruh')
-					}
-				}*/
 			})
 			this.outlets[outletId].process.on('error', (err) => {
 				console.log(`${err} | outletId: ${outletId}`)
 				this.outlets[outletId].process = null
 				this.outlets[outletId].status = -1
-				this.repairOutlet(outletId).then((val) => {
-					if(val === 'successful') {
-						this.outlets[outletId].status = 0
-						console.log(`Outlet was successfully repaired | outletId: ${outletId}`)
-					}
+				this.buckets.unshift(this.outlets[outletId].bucketLogs)
+				this.repairOutlet(outletId).then(() => {
+					this.outlets[outletId].status = 0
+					console.log(`Outlet was successfully repaired | outletId: ${outletId}`)
 				}).catch((err) => {
 					this.outlets[outletId].status = -2
 					console.log(err)
 				})
-				//return this.setUpNewOutlet()
 				return reject('changeOutlet')
 			})
 		}).catch((err) => {
 			if(err === 'changeOutlet') {
-				//console.log('reRun')
 				return this.setUpNewOutlet()
-				//reject('reRun')
 			}
-			else return Promise.reject('bfsdfs')
+			else return Promise.reject(err)
 		})
 	}
 
 	async requestIngredient(ingredient, reqAmount) {
 		return new Promise((resolve, reject) => {
-			//console.log('HERE')
-			//this.ingredients.map((val) => { return val.ingredient === ingredient })
 			const ingredientContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
-			if(ingredientContainersId.length === 0) reject(`There is no '${ingredient}' ingredient`)
+			if(ingredientContainersId.length === 0) return reject(`There is no '${ingredient}' ingredient`)
 			let i = 0
 			const ingredientContainersIdLeng = ingredientContainersId.length
 			let amount
 			let collectedAmount = 0
 			while(i < ingredientContainersIdLeng) {
+				if(collectedAmount === reqAmount) break
 				amount = this.containers[ingredientContainersId[i]].amount
 				if(amount > 0) {
 					if(amount > reqAmount) {
 						this.containers[ingredientContainersId[i]].amount -= reqAmount
 						collectedAmount += reqAmount
-						//resolve(reqAmount)
 					}
 					else {
 						this.containers[ingredientContainersId[i]].amount = 0
-						//resolve(amount)
 						collectedAmount += amount
 					}
 				}
 				i++
 			}
-			resolve(collectedAmount)
-			/*if(this.ingredients[ingredient] === undefined) reject(`There is no '${ingredient}' ingredient`)
-			const amount = this.ingredients[ingredient]
-			if(amount > 0) {
-				if(amount > reqAmount) {
-					this.ingredients[ingredient] -= reqAmount
-					resolve(reqAmount)
-				}
-				else {
-					this.ingredients[ingredient] = 0
-					resolve(amount)
-				}
-			}
-			else{
-				resolve()
-			}*/
+			return resolve(collectedAmount)
 		})
 	}
 
@@ -442,64 +328,36 @@ class Machine {
 		return (lastPriorityLevel > 0) ? lastPriorityLevel + 1 : 1
 	}
 
-	/*getRunningOutlets() {
-		return this.outlets.filter((val) => { return val.status > 0 })
-	}*/
-
 	async repairOutlet(outletId) {
-		/*const bug = setTimeout(() => {
-			console.log('after');
-			clearTimeout(bug)
-		}, 500);*/
 		return new Promise(async (resolve, reject) => {
 			if(Math.random() * 100 > 50){ // Impossible to repair simulation
-				//this.outlets[outletId].status = -2
-				//console.log(`Attempt to repair outlet failed | outletId: ${outletId}`)
 				return reject(`Impossible to repair outlet | outletId: ${outletId}`)
-			}//throw new Error(`Impossible to repair outlet | outletId: ${outletId}`)
-			//this.outlets[outletId].process.terminate()
-			//this.outlets[outletId].process = new Worker('./outlet.mjs')
-			//this.outlets[outletId].status = 0
-			//console.log(`Outlet was repaired | outletId: ${outletId}`)
-			return resolve('successful')
+			}
+			return resolve()
 		})
-		/*if(Math.random() * 100 > 50){ // Impossible to repair simulation
-			//this.outlets[outletId].status = -2
-			//console.log(`Attempt to repair outlet failed | outletId: ${outletId}`)
-			throw new Error(`Impossible to repair outlet | outletId: ${outletId}`)
-		}//throw new Error(`Impossible to repair outlet | outletId: ${outletId}`)
-		//this.outlets[outletId].process.terminate()
-		//this.outlets[outletId].process = new Worker('./outlet.mjs')
-		//this.outlets[outletId].status = 0
-		//console.log(`Outlet was repaired | outletId: ${outletId}`)
-		return 'successful'*/
 	}
 
 	waitForAvailableOutlet(timeOut) {
 		return new Promise((resolve) => {
-			const interval = 2000
+			const interval = 200
 			const i = 0
-			if(!timeOut || typeof timeOut === 'number') timeOut = 10000
+			if(!timeOut || typeof timeOut !== 'number') timeOut = 8000
 			const wfaoInterval = setInterval(() => {
-				//console.log('interval activated')
 				if(timeOut <= 0){
 					clearInterval(wfaoInterval)
 					return resolve()
 				}
 				const outletId = this.outlets.findIndex((outlet) => outlet.status === 0)
 				if(outletId !== -1) {
-					//console.log('interval found available outlet ' + outletId)
-					//this.outlets[outletId].status = -1 // changing outlet's status to -1 as soon as possible to avoid conflicts // TODO: make it elsehow
 					clearInterval(wfaoInterval)
 					return resolve(outletId)
 				}
 				if(this.outlets.filter((outlet) => outlet.status < -1).length === this.outlets.length) {
-					//console.log("interval didn't find any 'busy' outlet")
 					clearInterval(wfaoInterval)
 					return resolve()
 				}
 				timeOut -= interval
-			}, 2000)
+			}, interval)
 		})
 	}
 
@@ -572,7 +430,6 @@ class Machine {
 	}).catch((error) => {
 		console.log(error)
 	}).finally(() => {
-		console.log('ALL DONE!!!!!!!!')
 		clearInterval(job)
 	})
 

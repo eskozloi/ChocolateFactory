@@ -12,9 +12,9 @@ const insertBucket = (newBucket) => {
   //console.log(`Adding ${amount}units of milk to bucket ${bucket.id}`)
   //console.log(newBucket)
   bucket = newBucket
-  console.log('Inserting bucket')
-  console.log(bucket)
-  console.log(proportions)
+  //console.log('Inserting bucket')
+  //console.log(bucket)
+  //console.log(proportions)
   scanBucket()
 }
 
@@ -32,36 +32,48 @@ const addCacao = (amount) => {
 
 const addIngredient = (ingredient, amount) => {
   bucket[ingredient] += amount
-  scanBucket()
+  scanBucket(ingredient)
 }
 
-const scanBucket = () => {
+const scanBucket = (reqIngredient) => {
   /*let ingredients = proportions.forEach(([ingredient, ratio]) => {
     const reqAmount = bucket.capacity * ratio - bucket[ingredient]
     if (reqAmount > 0) return proportions[ingredient] = reqAmount
   })*/
+  //console.log(bucket)
   let ingredients = {}
   Object.entries(proportions).forEach(([ingredient, ratio]) => {
+    //if(reqIngredient && reqIngredient !== ingredient) return
     const reqAmount = bucket.capacity * ratio - bucket[ingredient]
     if(reqAmount !== 0) ingredients[ingredient] = reqAmount
   })
-  console.log(ingredients)
-  if(ingredients.length !== 0) parentPort.postMessage({header: 'requestIngredients', body: ingredients})
+  //console.log(ingredients)
+  if(Object.keys(ingredients).length !== 0) {
+    if(reqIngredient) {
+      if(!ingredients[reqIngredient]) return
+      ingredients = {[reqIngredient]: ingredients[reqIngredient]}
+    }
+    parentPort.postMessage({header: 'requestIngredients', body: ingredients})
+  }
   else parentPort.postMessage({header: 'returnBucket', body: bucket, reason: 'done'})
 }
 
+/*const checkIfDone = () => {
+
+}*/
+
 const livelinessCheck = setInterval(() => {
-  console.log('here')
+  //console.log('here')
   //if(Math.random() * 100 > 70) parentPort.postMessage('requestCleanup') // Clogged pipes simulation
-  if(Math.random() * 100 > 95) throw new Error('Something went wrong with the outlet') // Error simulation
+  if(Math.random() * 100 > 98) throw new Error('Something went wrong with the outlet') // Error simulation
   if(!bucket) parentPort.postMessage({header: 'requestBucket'})
-}, 4000)
+}, 200)
 
 parentPort.on('message', (message) => {
-  console.log('outlete is here '+message.header)
+  //console.log('outlete is here '+message.header)
   switch(message.header) {
     case 'addIngredients':
-      Object.entries(message.ingredients).forEach(([ingredient, amount]) => {addIngredient(ingredient, amount)})
+      Object.entries(message.body).forEach(([ingredient, amount]) => {addIngredient(ingredient, amount)})
       break
     case 'insertBucket':
       insertBucket(message.body)
