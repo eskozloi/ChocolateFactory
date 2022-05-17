@@ -5,8 +5,8 @@ import { Worker } from 'worker_threads'
 class Machine {
 
 	containers = [
-		{ ingredient: 'milk', amount: 0, capacity: Infinity }, // 'milk' is not going to be a key, because there are can be multiple 'milk' containers
-		{ ingredient: 'cacao', amount: 0, capacity: Infinity },
+		{ ingredient: 'milk', amount: 0, capacity: 9999 }, // 'milk' is not going to be a key, because there are can be multiple 'milk' containers
+		{ ingredient: 'cacao', amount: 0, capacity: 9999 },
 		{ ingredient: 'waste', amount: 0, capacity: Infinity },
 		// { ingredient: something, amount: 0, capacity: 9999 },
 		// etc...
@@ -39,17 +39,14 @@ class Machine {
 	// If all outlets threw error, the machine will be stopped
 
 	constructor(machineSlotsNumber, outlets) {
-		if(machineSlotsNumber && typeof machineSlotsNumber === 'number') this.machineSlotsNumber = machineSlotsNumber
-		if(outlets && Array.isArray(outlets)) {
+		if(!isNaN((machineSlotsNumber = Number(machineSlotsNumber)))) this.machineSlotsNumber = machineSlotsNumber
+		if(Array.isArray(outlets)) {
 			const validOutlets = outlets.filter((val) => {
-				return (typeof val.status === 'number' && val.process === null) //TODO: something with this shit
+				return (!isNaN((val.status = Number(val.status))) && val.process === null)
 			})
 			this.outlets = validOutlets
 		}
-		if(this.outlets.length === 0) {
-			//this.outlets = [{status: 0, process: null},{status: -1, process: null}]
-			//this.outlets = [{status: 0, process: null},{status: 0, process: null},{status: 0, process: null}]
-			//this.outlets = [{status: 0, process: null},{status: 0, process: null},{status: 3, process: null},{status: 0, process: null}]
+		if(this.outlets.length === 0) { // Creation of random outlets if no outlets were given
 			let outlets = []
 			let i = 0;
 			const rndOutletsNum = Math.round(Math.random() * 3 + 3)
@@ -66,28 +63,24 @@ class Machine {
 	}
 
 	addMilk(amount) {
-		if(typeof amount !== 'number') throw new Error("Milk 'amount' must be a number, not a " + typeof amount)
+		if(isNaN((amount = Number(amount)))) throw new Error(`'amount' must be a number | ${typeof amount} given | addMilk function`)
 		this.addIngredient('milk', amount)
 	}
 
 	addCacao(amount) {
-		if(typeof amount !== 'number') throw new Error("Cacao 'amount' must be a number, not a " + typeof amount)
+		if(isNaN((amount = Number(amount)))) throw new Error(`'amount' must be a number | ${typeof amount} given | addCacao function`)
 		this.addIngredient('cacao', amount)
 	}
 
 	async addIngredient(ingredient, amount) {
-		/*if(typeof ingredient !== 'string') throw new Error(`'ingredient' must be a string, not a ${typeof ingredient}`)
-		if(typeof amount !== 'number') throw new Error(`'amount' must be a number, not a ${typeof amount}`)*/
 		return new Promise((resolve, reject) => {
-			//const wasteContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
-			const ingredientContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
+			if(typeof ingredient !== 'string') return reject(`'ingredient' must be a string | ${typeof ingredient} given | addIngredient function`)
+			if(isNaN((amount = Number(amount)))) return reject(`'amount' must be a number | ${typeof amount} given | addIngredient function`)
+			if(amount <= 0) return reject(`'amount' must be a positive number and not equal to 0 | ${amount} given | addIngredient function`)
+			let ingredientContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
 			if(ingredientContainersId.length === 0) {
-				// TODO: this
-				/*if(wasteContainersId.length === 0) {
-
-					return reject(`There is no waste containers in the machine, random empty container will be used`)
-				}*/
-				return reject(`There is no containers with a '${ingredient}' ingredient in the machine`)
+				ingredient = 'waste'
+				ingredientContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
 			}
 			let i = 0
 			const ingredientContainersIdLeng = ingredientContainersId.length
@@ -99,54 +92,61 @@ class Machine {
 					i++
 					break
 				}
-				this.containers[i].amount = this.containers[i].capacity
+				this.containers[ingredientContainersId[i]].amount = this.containers[ingredientContainersId[i]].capacity
 				amount = amount - containerFreeSpace
 				i++
 			}
 			if(amount === 0) return resolve(ingredient)
-			// TODO: make exception when there is no space in the 'ingredient' containers
-			return reject(`TODO: make exception when there is no space in the 'ingredient' containers | ${ingredient} | ${amount}`)
+			if(ingredient !== 'waste') return this.addIngredient('waste', amount)
+			// TODO: make exception when there is no space in waste containers
+			return reject(`TODO: make exception when there is no space in waste containers`)
 		}).then((ingredient) => {
-			this.checkIngredientsQueue(ingredient)
+			if(ingredient !== 'waste') this.checkIngredientsQueue(ingredient)
 		}).catch((err) => {
 			console.log(err)
 		})
 	}
 
 	async checkIngredientsQueue(ingredient) {
-		let topPriorityOutletId
-		let topPriority = Infinity
-		Object.entries(this.outlets).forEach(([id, outlet]) => {
-			if(outlet.status > 0 && outlet.queue && outlet.queue[ingredient]) {
-				if(outlet.status < topPriority) {
-					topPriority = outlet.status
-					topPriorityOutletId = id
+		return new Promise((resolve, reject) => {
+			if(!ingredient) return reject(`'ingredient' must be provided | ${ingredient} given | checkIngredientsQueue function`)
+			let topPriorityOutletId
+			let topPriority = Infinity
+			Object.entries(this.outlets).forEach(([id, outlet]) => {
+				if(outlet.status > 0 && outlet.queue && outlet.queue[ingredient]) {
+					if(outlet.status < topPriority) {
+						topPriority = outlet.status
+						topPriorityOutletId = id
+					}
 				}
-			}
-		})
-		if(topPriorityOutletId){
-			this.requestIngredient(ingredient, this.outlets[topPriorityOutletId].queue[ingredient]).then((recivedAmount) => {
-				let respIngredient = {}
-				respIngredient[ingredient] = recivedAmount
-				this.outlets[topPriorityOutletId].process.postMessage({header: 'addIngredients', body: respIngredient})
-				this.outlets[topPriorityOutletId].bucketLogs[ingredient] += recivedAmount
-				delete this.outlets[topPriorityOutletId].queue[ingredient]
 			})
-		}
+			if(topPriorityOutletId){
+				this.requestIngredient(ingredient, this.outlets[topPriorityOutletId].queue[ingredient]).then((recivedAmount) => {
+					if(recivedAmount > 0) {
+						const respIngredient = {[ingredient]: recivedAmount}
+						this.outlets[topPriorityOutletId].process.postMessage({header: 'addIngredients', body: respIngredient})
+						this.outlets[topPriorityOutletId].bucketLogs[ingredient] += recivedAmount
+						delete this.outlets[topPriorityOutletId].queue[ingredient]
+					}
+				})
+			}
+		}).catch((err) => { console.log(err) })
 	}
 
 	async load(buckets, onBucketReady, slotsNumber) {
-		if(!Array.isArray(buckets)) throw new Error("'buckets' must be an array, not a " + typeof buckets)
-		if(typeof onBucketReady !== 'function') throw new Error("'onBucketReady' must be a function, not a " + typeof onBucketReady)
-		if(!slotsNumber || typeof slotsNumber !== 'number' || slotsNumber > this.machineSlotsNumber) slotsNumber = this.machineSlotsNumber
+		if(!Array.isArray(buckets)) throw new Error(`'buckets' must be an array | ${buckets} given | load function`)
+		if(typeof onBucketReady !== 'function') throw new Error(`'onBucketReady' must be a function | ${onBucketReady} given | load function`)
+		if(isNaN((slotsNumber = Number(slotsNumber))) || slotsNumber > this.machineSlotsNumber) slotsNumber = this.machineSlotsNumber
 
 		this.onBucketReady = onBucketReady
 		const validBuckets = buckets.map((bucket) => {
-			Object.entries(bucket).forEach(([key, value]) => {
-				const newValue = Number(value)
-				bucket[key] = (newValue) ? newValue : 0
-			})
-			return bucket
+			if(typeof bucket === 'object'){
+				Object.entries(bucket).forEach(([key, value]) => {
+					value = Number(value)
+					bucket[key] = (!isNaN(value)) ? value : 0
+				})
+				return bucket
+			}
 		})
 		if(validBuckets.length !== 0) this.buckets = validBuckets
 
@@ -189,14 +189,14 @@ class Machine {
 
 	setUpNewOutlet(outletId) {
 		return new Promise(async (resolve, reject) => {
-			if(outletId === undefined || typeof outletId !== 'number') outletId = this.outlets.findIndex((outlet) => outlet.status === 0)
+			if(isNaN((outletId = Number(outletId)))) outletId = this.outlets.findIndex((outlet) => outlet.status === 0)
 			if(outletId === -1) {
 				//console.log(this.outlets)
-				if(this.outlets.find((val) => { return val.status > -2 }) === undefined) {
+				if(!this.outlets.find((val) => { return val.status > -2 })) {
 					console.log('rejecting')
 					return reject("There are no outlets available")
 				}
-				else if(this.outlets.find((val) => { return val.status === -1 }) === undefined){
+				else if(!this.outlets.find((val) => { return val.status === -1 })){
 					return resolve()
 				}
 				else{
@@ -208,28 +208,19 @@ class Machine {
 				}
 			}
 			this.outlets[outletId].status = -1
-			console.log('setUpNewOutlet '+outletId)
+			console.log(`Set up new outlet | outletId: ${outletId}`)
 			this.outlets[outletId].process = new Worker('./outlet.mjs', { workerData: this.proportions })
 			let bucket = this.buckets.shift()
 			this.outlets[outletId].bucketLogs = bucket
 			this.outlets[outletId].process.postMessage({header: 'insertBucket', body: bucket})
-			this.outlets[outletId].status = this.getNewPriorityLevel() // TODO: maybe make functions ONLY for outlets, because there are can be other "mechanisms"
+			this.outlets[outletId].status = this.getNewPriorityLevel()
 			this.outlets[outletId].process.on('message', (message) => {
 				switch(message.header) {
 					case 'requestIngredients':
 						Object.entries(message.body).forEach(([ingredient, amount]) => {
-							this.requestIngredient(ingredient, amount).then((recivedAmount) => {
-								if(recivedAmount > 0) {
-									let respIngredient = {}
-									respIngredient[ingredient] = recivedAmount
-									this.outlets[outletId].process.postMessage({header: 'addIngredients', body: respIngredient})
-									this.outlets[outletId].bucketLogs[ingredient] += recivedAmount
-								}
-								else {
-									if(!this.outlets[outletId].queue) this.outlets[outletId].queue = {}
-									this.outlets[outletId].queue[ingredient] = amount
-								}
-							}).catch((err) => {console.log(err)})
+							if(!this.outlets[outletId].queue) this.outlets[outletId].queue = {}
+							this.outlets[outletId].queue[ingredient] = amount
+							this.checkIngredientsQueue(ingredient)
 						})
 						break
 					case 'requestBucket':
@@ -241,7 +232,6 @@ class Machine {
 						bucket = message.body
 						switch(message.reason) {
 							case 'done':
-								//console.log(`status: ${this.outlets[outletId].status} | outletId ${outletId}`)
 								this.onBucketReady(bucket)
 								if(this.buckets.length === 0) {
 									this.outlets[outletId].process.terminate()
@@ -298,8 +288,10 @@ class Machine {
 
 	async requestIngredient(ingredient, reqAmount) {
 		return new Promise((resolve, reject) => {
+			if(!ingredient) return reject(`'ingredient' must be provided | ${ingredient} given | requestIngredient function`)
+			if(isNaN((reqAmount = Number(reqAmount)))) return reject(`'reqAmount' must be a number | ${typeof reqAmount} given | requestIngredient function`)
 			const ingredientContainersId = Object.keys(this.containers).filter((key) => { return this.containers[key].ingredient === ingredient })
-			if(ingredientContainersId.length === 0) return reject(`There is no '${ingredient}' ingredient`)
+			if(ingredientContainersId.length === 0) return reject(`There is no '${ingredient}' ingredient | requestIngredient function`)
 			let i = 0
 			const ingredientContainersIdLeng = ingredientContainersId.length
 			let amount
@@ -320,7 +312,7 @@ class Machine {
 				i++
 			}
 			return resolve(collectedAmount)
-		})
+		}).catch((err) => { console.log(err) })
 	}
 
 	getNewPriorityLevel() {
@@ -330,6 +322,7 @@ class Machine {
 
 	async repairOutlet(outletId) {
 		return new Promise(async (resolve, reject) => {
+			if(isNaN((outletId = Number(outletId)))) return reject(`'outletId' must be a number | ${typeof outletId} given | repairOutlet function`)
 			if(Math.random() * 100 > 50){ // Impossible to repair simulation
 				return reject(`Impossible to repair outlet | outletId: ${outletId}`)
 			}
@@ -339,9 +332,9 @@ class Machine {
 
 	waitForAvailableOutlet(timeOut) {
 		return new Promise((resolve) => {
+			if(isNaN((timeOut = Number(timeOut))) || timeOut < 0) timeOut = 8000
 			const interval = 200
 			const i = 0
-			if(!timeOut || typeof timeOut !== 'number') timeOut = 8000
 			const wfaoInterval = setInterval(() => {
 				if(timeOut <= 0){
 					clearInterval(wfaoInterval)
@@ -360,50 +353,6 @@ class Machine {
 			}, interval)
 		})
 	}
-
-	/*async getAvailableOutlet() {
-		outletId = this.outlets.findIndex((outlet) => outlet.status === 0)
-		if(outletId === -1) {
-			console.log(this.outlets)
-			if(this.outlets.find((val) => { return val.status > -2 }) === undefined) {
-				console.log('rejecting')
-				return reject("There are no outlets available")
-				//throw new Error("There are no outlets available")
-				//return Promise.reject("There are no outlets available")
-			}
-			else if(this.outlets.find((val) => { return val.status === -1 }) === undefined){
-
-				//return resolve()
-				//return
-				//return Promise.resolve()
-			}
-			else{
-				console.log('newId')
-				outletId = await this.waitForAvailableOutlet()
-				if(outletId === undefined) { // TODO: remember '!0 = true' :)
-					console.log('rejecting2')
-					return
-					//return reject("There are no outlets available")
-				}
-			}
-		}
-	}*/
-
-	/*getAllOutlets() { // Getting information about internal outlets simulation
-		let outlets = []
-		let i = 0;
-		while(i < Math.round(Math.random() * 4 + 2)) {
-			outlets.push({
-				status: (Math.random() * 100 > 70) ? 0 : Math.round(0 - Math.random() * 3),
-				process: null
-			})
-			i++
-		}
-		// Status represents not only outlet's status, but also priority level
-		// Where everything: < 0 -> errors, 0 -> idle/inactive, > 0 -> priority level(lower = higher priority)
-		// Error codes: -1 -> bussy(e.g. self repairing/cleaning), -2 -> broken(e.g. throws errors), -3 -> unknow(no connection between machine and outlet)
-		return outlets
-	}*/
 }
 
 
